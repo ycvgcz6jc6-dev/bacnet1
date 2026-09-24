@@ -5,7 +5,7 @@ d'équipements BACnet/IP.
 
 ## État
 
-Version expérimentale 0.1.0.
+Version expérimentale 0.1.1.
 
 Cette première version a été créée pour tester un système
 Honeywell ComfortPoint Open depuis Home Assistant.
@@ -113,3 +113,16 @@ la V0.2 pourra ajouter :
 
 Les commandes BACnet resteront désactivées tant que la couche
 de lecture n'aura pas été validée.
+
+## Correctifs 0.1.1
+
+- Configuration YAML corrigée pour permettre le chargement dans la boutique.
+- Image de base Home Assistant disponible et Python installé explicitement.
+- Découverte compatible avec BAC0 2026.7.25 : lecture des réponses I-Am de `who_is`.
+- Port BACnet configuré réellement appliqué ; interrogation directe de la cible si le broadcast local ne la trouve pas.
+- Fonctions de lecture et inventaire conservées, sans commande d'écriture.
+
+Après actualisation de la boutique, installer ou mettre à jour vers **0.1.1**.
+Vérifier que `local_ip` est l'adresse réelle de Home Assistant et que `target_ip`
+est celle du contrôleur. Le journal permet de vérifier la réponse I-Am.
+Les tests logiciels ne remplacent pas cet essai sur le réseau Honeywell réel.
