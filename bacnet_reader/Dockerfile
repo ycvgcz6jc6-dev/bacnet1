@@ -1,8 +1,10 @@
-ARG BUILD_FROM
+ARG BUILD_FROM=ghcr.io/home-assistant/base:3.24-2026.08.0
 FROM ${BUILD_FROM}
 
 RUN apk add --no-cache \
     bash \
+    python3 \
+    py3-pip \
     iproute2 \
     iputils \
     tcpdump

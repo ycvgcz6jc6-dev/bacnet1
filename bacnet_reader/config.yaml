@@ -1,8 +1,8 @@
 name: BACnet Reader
-version: "0.1.0"
+version: "0.1.1"
 slug: bacnet-reader
 description: "Diagnostic BACnet/IP en lecture seule pour Home Assistant"
-url: "url: "https://github.com/ycvgcz6jc6-dev/bacnet1"
+url: "https://github.com/ycvgcz6jc6-dev/bacnet1"
 arch:
   - amd64
   - aarch64
@@ -24,6 +24,6 @@ schema:
   local_ip: str
   target_ip: str
   bacnet_port: port
-  discovery_interval: int
+  discovery_interval: int(1,86400)
   read_device_info: bool
   log_level: list(DEBUG|INFO|WARNING|ERROR)

@@ -4,7 +4,6 @@ import os
 import signal
 import socket
 import sys
-import time
 
 import BAC0
 
@@ -193,6 +192,10 @@ def normalize_discovered_device(device):
 
     try:
 
+        # BAC0 2026.7.25 returns IAmRequest objects from who_is().
+        if hasattr(device, "iAmDeviceIdentifier"):
+            return str(device.pduSource), int(device.iAmDeviceIdentifier[1])
+
         if isinstance(device, (tuple, list)):
 
             if len(device) >= 2:
@@ -206,11 +209,12 @@ def normalize_discovered_device(device):
                 or device.get("ip")
             )
 
-            device_id = (
-                device.get("device_id")
-                or device.get("deviceId")
-                or device.get("instance")
+            device_id = next(
+                (device[key] for key in ("device_id", "deviceId", "instance")
+                 if device.get(key) is not None), None
             )
+            if device_id is None and device.get("object_instance") is not None:
+                device_id = device["object_instance"][1]
 
             if address is not None and device_id is not None:
                 return str(address), int(device_id)
@@ -227,22 +231,24 @@ async def discovery_cycle(bacnet):
     log.info("Envoi Who-Is...")
 
     try:
-        result = bacnet.whois()
-
-        if asyncio.iscoroutine(result):
-            await result
-
+        # Explicit local broadcast; consume the actual I-Am responses.
+        # whois() and the discoveredDevices cache are not this API.
+        discovered = await bacnet.who_is(address="*", timeout=3)
     except Exception as err:
         log.warning("Who-Is : %s", err)
+        discovered = []
 
-    # Laisse le temps aux I-Am d'arriver.
-    await asyncio.sleep(5)
-
-    discovered = getattr(
-        bacnet,
-        "discoveredDevices",
-        [],
-    )
+    if not any(
+        (normalize_discovered_device(device)[0] or "").split(":")[0] == TARGET_IP
+        for device in discovered
+    ):
+        try:
+            directed = await bacnet.who_is(
+                address=f"{TARGET_IP}:{BACNET_PORT}", timeout=3
+            )
+            discovered = list(discovered) + list(directed)
+        except Exception as err:
+            log.warning("Who-Is ciblé : %s", err)
 
     if not discovered:
         log.warning("Aucun équipement BACnet découvert.")
@@ -304,7 +310,7 @@ async def discovery_cycle(bacnet):
 async def main():
 
     log.info("BACnet Reader démarré.")
-    log.info("VERSION : 0.1.0")
+    log.info("VERSION : 0.1.1")
     log.info("MODE    : READ ONLY")
 
     if not test_ip_connectivity():
@@ -318,7 +324,7 @@ async def main():
     try:
 
         async with BAC0.start(
-            ip=LOCAL_IP
+            ip=LOCAL_IP, port=BACNET_PORT
         ) as bacnet:
 
             log.info("BACnet/IP initialisé.")
