@@ -193,6 +193,9 @@ def normalize_discovered_device(device):
 
     try:
 
+        if hasattr(device, "iAmDeviceIdentifier"):
+            return str(device.pduSource), int(device.iAmDeviceIdentifier[1])
+
         if isinstance(device, (tuple, list)):
 
             if len(device) >= 2:
@@ -227,22 +230,13 @@ async def discovery_cycle(bacnet):
     log.info("Envoi Who-Is...")
 
     try:
-        result = bacnet.whois()
-
-        if asyncio.iscoroutine(result):
-            await result
+        discovered = await bacnet.who_is(
+            address=f"{TARGET_IP}:{BACNET_PORT}", timeout=5
+        )
 
     except Exception as err:
         log.warning("Who-Is : %s", err)
-
-    # Laisse le temps aux I-Am d'arriver.
-    await asyncio.sleep(5)
-
-    discovered = getattr(
-        bacnet,
-        "discoveredDevices",
-        [],
-    )
+        return
 
     if not discovered:
         log.warning("Aucun équipement BACnet découvert.")
@@ -318,7 +312,7 @@ async def main():
     try:
 
         async with BAC0.start(
-            ip=LOCAL_IP
+            ip=LOCAL_IP, port=BACNET_PORT
         ) as bacnet:
 
             log.info("BACnet/IP initialisé.")
