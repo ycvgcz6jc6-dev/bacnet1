@@ -1,6 +1,6 @@
 name: BACnet Reader
 version: "0.1.0"
-slug: bacnet_reader
+slug: bacnet-reader
 description: "Diagnostic BACnet/IP en lecture seule pour Home Assistant"
 url: "url: "https://github.com/ycvgcz6jc6-dev/bacnet1"
 arch:
