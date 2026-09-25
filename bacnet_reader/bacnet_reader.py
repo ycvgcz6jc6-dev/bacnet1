@@ -1,539 +1,190 @@
-import asyncio
-import logging
-import os
-import signal
-import socket
-import sys
-import time
-
-import BAC0
-
-
-LOCAL_IP = os.getenv("LOCAL_IP", "192.168.0.39/24")
-TARGET_IP = os.getenv("TARGET_IP", "192.168.0.249")
-BACNET_PORT = int(os.getenv("BACNET_PORT", "47808"))
-DISCOVERY_INTERVAL = int(os.getenv("DISCOVERY_INTERVAL", "60"))
-READ_DEVICE_INFO = os.getenv(
-    "READ_DEVICE_INFO", "true"
-).lower() in ("1", "true", "yes")
-
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-
-
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL, logging.INFO),
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
-
-log = logging.getLogger("BACnetReader")
-
-running = True
-
-
-def stop_handler(*_):
-    global running
-    running = False
-    log.info("Arrêt demandé.")
-
-
-signal.signal(signal.SIGTERM, stop_handler)
-signal.signal(signal.SIGINT, stop_handler)
-
-
-def test_ip_connectivity():
-    """
-    Vérification simple du routage IP.
-
-    Aucun paquet BACnet d'écriture n'est envoyé.
-    """
-    log.info("Test réseau vers %s ...", TARGET_IP)
-
-    try:
-        socket.inet_aton(TARGET_IP)
-    except OSError:
-        log.error("Adresse cible invalide : %s", TARGET_IP)
-        return False
-
-    return True
-
-
-async def read_property_safe(bacnet, address, obj, instance, prop):
-    """
-    Lecture BACnet uniquement.
-
-    Cette application ne contient volontairement
-    aucune fonction WriteProperty.
-    """
-
-    request = f"{address} {obj} {instance} {prop}"
-
-    try:
-        result = await bacnet.read(request)
-        return result
-
-    except Exception as err:
-        log.debug(
-            "Lecture impossible [%s]: %s",
-            request,
-            err,
-        )
-        return None
-
-
-async def inspect_device(bacnet, address, device_id):
-    log.info("--------------------------------------------")
-    log.info("Équipement BACnet détecté")
-    log.info("Adresse   : %s", address)
-    log.info("Device ID : %s", device_id)
-
-    if not READ_DEVICE_INFO:
-        return
-
-    properties = {
-        "Nom": "objectName",
-        "Fabricant": "vendorName",
-        "Modèle": "modelName",
-        "Firmware": "firmwareRevision",
-        "Application": "applicationSoftwareVersion",
-        "Description": "description",
-        "Location": "location",
-        "Vendor ID": "vendorIdentifier",
-        "Protocol version": "protocolVersion",
-        "Protocol revision": "protocolRevision",
-    }
-
-    for label, prop in properties.items():
-
-        value = await read_property_safe(
-            bacnet,
-            address,
-            "device",
-            device_id,
-            prop,
-        )
-
-        if value is not None:
-            log.info("%-18s : %s", label, value)
-
-
-
-# MQTT is used only to publish measurements. No command topics are subscribed.
-import json
-import math
-import threading
-import urllib.request
+import asyncio, json, logging, math, os, signal, socket, sys, threading, time, urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+import BAC0
 import paho.mqtt.client as mqtt
 
-VALUE_TYPES = {
-    "analog-input", "analog-output", "analog-value",
-    "binary-input", "binary-output", "binary-value",
-    "multi-state-input", "multi-state-output", "multi-state-value",
-}
-UNITS = {
-    "degrees-celsius": ("°C", "temperature"),
-    "degrees-fahrenheit": ("°F", "temperature"),
-    "degrees-kelvin": ("K", "temperature"),
-    "percent": ("%", None), "percent-relative-humidity": ("%", "humidity"),
-    "pascals": ("Pa", "pressure"), "hectopascals": ("hPa", "pressure"),
-    "kilopascals": ("kPa", "pressure"), "bars": ("bar", "pressure"),
-    "millibars": ("mbar", "pressure"),
-    "watts": ("W", "power"), "kilowatts": ("kW", "power"),
-    "watt-hours": ("Wh", "energy"), "kilowatt-hours": ("kWh", "energy"),
-    "volts": ("V", "voltage"), "amperes": ("A", "current"),
-    "hertz": ("Hz", "frequency"), "seconds": ("s", "duration"),
-    "minutes": ("min", "duration"), "hours": ("h", "duration"),
-    "liters-per-second": ("L/s", "volume_flow_rate"),
-    "liters-per-minute": ("L/min", "volume_flow_rate"),
-    "cubic-meters-per-hour": ("m³/h", "volume_flow_rate"),
-    "meters-per-second": ("m/s", "speed"),
-}
-metadata_cache = {}
-bridge = None
+VERSION='0.3.0-phase1'
+LOCAL_IP=os.getenv('LOCAL_IP','192.168.0.39/24'); TARGET_IP=os.getenv('TARGET_IP','192.168.0.249')
+BACNET_PORT=int(os.getenv('BACNET_PORT','47808')); DISCOVERY_INTERVAL=int(os.getenv('DISCOVERY_INTERVAL','60'))
+METADATA_REFRESH=int(os.getenv('METADATA_REFRESH','1800')); POLL_DELAY=float(os.getenv('POLL_DELAY','0.02'))
+READ_DEVICE_INFO=os.getenv('READ_DEVICE_INFO','true').lower() in ('1','true','yes'); LOG_LEVEL=os.getenv('LOG_LEVEL','INFO').upper()
+logging.basicConfig(level=getattr(logging,LOG_LEVEL,logging.INFO),format='%(asctime)s | %(levelname)s | %(message)s'); log=logging.getLogger('BACnetReader')
+running=True; bridge=None; metadata_cache={}; object_cache={}; cache_time={}
+VALUE_TYPES={'analog-input','analog-output','analog-value','binary-input','binary-output','binary-value','multi-state-input','multi-state-output','multi-state-value'}
+META_PROPS=('objectName','description','units','statusFlags','reliability','outOfService')
+UNITS={'degrees-celsius':('°C','temperature'),'percent':('%',None),'percent-relative-humidity':('%','humidity'),'pascals':('Pa','pressure'),'kilopascals':('kPa','pressure'),'watts':('W','power'),'kilowatts':('kW','power'),'watt-hours':('Wh','energy'),'kilowatt-hours':('kWh','energy'),'cubic-meters-per-hour':('m³/h','volume_flow_rate'),'liters-per-second':('L/s','volume_flow_rate'),'seconds':('s','duration'),'minutes':('min','duration'),'hours':('h','duration')}
+ZONE_RULES=[('Grande Salle',('bloca','bloc_a','salle_a','gp1','tcgp1')),('Petite Salle',('blocb','bloc_b','salle_b')),('Communs',('blocc','blocd','bloc_c','bloc_d','c_d')),('Bureaux administratifs',('blocext','bloc_ext','extension')),('ECS',('ecs','boil')),('Chaufferie',('chr','chau','chaud'))]
+METER_HINTS=('mbus','m-bus','modbus','meter','compteur','kwh','mwh','energie','energy','gaz','gas','eau','water','volume','m3','pulse','index','power')
 
+def stop_handler(*_):
+ global running; running=False; log.info('Arrêt demandé.')
+signal.signal(signal.SIGTERM,stop_handler); signal.signal(signal.SIGINT,stop_handler)
+
+def test_ip_connectivity():
+ try: socket.inet_aton(TARGET_IP); return True
+ except OSError: log.error('Adresse cible invalide : %s',TARGET_IP); return False
+
+async def read_property_safe(bacnet,address,obj,instance,prop):
+ try: return await bacnet.read(f'{address} {obj} {instance} {prop}')
+ except Exception as err: log.debug('Lecture impossible [%s %s %s %s]: %s',address,obj,instance,prop,err); return None
+
+def text(v): return None if v is None else str(v)
+def classify(name,description='',units=''):
+ hay=f'{name} {description}'.lower().replace('-','_')
+ zone='Technique BACnet'
+ for label,needles in ZONE_RULES:
+  if any(n in hay for n in needles): zone=label; break
+ if any(n in hay for n in ('cta','vent','vpu','vex','debpul','debrep','prspul','prsrep')): subsystem='Ventilation / CTA'
+ elif any(n in hay for n in ('ecs','boil')): subsystem='ECS'
+ elif any(n in hay for n in ('tmp','temp','chr','rad','pompe','po','vanne')): subsystem='Chauffage'
+ elif any(n in hay for n in ('alm','alarm','fire')): subsystem='Alarmes / sécurité'
+ else: subsystem='BACnet'
+ meter=any(n in hay for n in METER_HINTS) or str(units).lower() in ('kilowatt-hours','watt-hours')
+ return zone,subsystem,meter
+
+def normalized_value(obj_type,value):
+ if value is None:return None
+ if obj_type.startswith('binary-'):
+  s=str(value).lower()
+  return 'ON' if s in ('active','1','true') else ('OFF' if s in ('inactive','0','false') else None)
+ try:
+  n=float(value)
+  if not math.isfinite(n):return None
+  return int(n) if obj_type.startswith('multi-state-') else round(n,4)
+ except (TypeError,ValueError): return str(value) if obj_type.startswith('multi-state-') else None
 
 class MQTTBridge:
-    def __init__(self):
-        # Supervisor supplies local service credentials; never log or persist them.
-        request = urllib.request.Request(
-            "http://supervisor/services/mqtt",
-            headers={"Authorization": "Bearer " + os.environ["SUPERVISOR_TOKEN"]},
-        )
-        with urllib.request.urlopen(request, timeout=10) as response:
-            result = json.load(response)
-        if result.get("result") != "ok":
-            raise RuntimeError("Service MQTT indisponible")
-        service = result["data"]
-        self.root = "bacnet_reader/" + TARGET_IP.replace(".", "_")
-        self.availability = self.root + "/availability"
-        self.connected = threading.Event()
-        self.configs = {}
-        self.client = mqtt.Client(
-            mqtt.CallbackAPIVersion.VERSION2,
-            client_id="bacnet_reader_" + TARGET_IP.replace(".", "_"),
-            protocol=mqtt.MQTTv5,
-        )
-        self.client.username_pw_set(service["username"], service["password"])
-        if service.get("ssl"):
-            self.client.tls_set()
-        self.client.will_set(self.availability, "offline", qos=1, retain=True)
-        self.client.on_connect = self.on_connect
-        self.client.on_disconnect = self.on_disconnect
-        self.client.reconnect_delay_set(1, 60)
-        self.client.max_queued_messages_set(2000)
-        self.client.connect_async(service["host"], int(service["port"]), 60)
-        self.client.loop_start()
+ def __init__(self):
+  req=urllib.request.Request('http://supervisor/services/mqtt',headers={'Authorization':'Bearer '+os.environ['SUPERVISOR_TOKEN']})
+  with urllib.request.urlopen(req,timeout=10) as response: result=json.load(response)
+  if result.get('result')!='ok': raise RuntimeError('Service MQTT indisponible')
+  svc=result['data']; self.root='bacnet_reader/'+TARGET_IP.replace('.','_'); self.availability=self.root+'/availability'; self.connected=threading.Event(); self.configs={}
+  self.client=mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,client_id='bacnet_reader_'+TARGET_IP.replace('.','_'),protocol=mqtt.MQTTv5)
+  self.client.username_pw_set(svc['username'],svc['password']);
+  if svc.get('ssl'): self.client.tls_set()
+  self.client.will_set(self.availability,'offline',qos=1,retain=True); self.client.on_connect=self.on_connect; self.client.on_disconnect=self.on_disconnect; self.client.reconnect_delay_set(1,60); self.client.max_queued_messages_set(2000); self.client.connect_async(svc['host'],int(svc['port']),60); self.client.loop_start()
+ def on_connect(self,client,userdata,flags,reason_code,properties):
+  if reason_code.is_failure: log.error('Connexion MQTT refusée : %s',reason_code); return
+  self.configs.clear(); self.connected.set(); client.publish(self.availability,'online',qos=1,retain=True); log.info('MQTT connecté.')
+ def on_disconnect(self,*_): self.connected.clear()
+ def publish(self,topic,payload,retain=False):
+  if not self.connected.is_set(): return False
+  if isinstance(payload,dict): payload=json.dumps(payload,ensure_ascii=False,allow_nan=False)
+  return self.client.publish(topic,payload,qos=1,retain=retain).rc==mqtt.MQTT_ERR_SUCCESS
+ def device(self,device_id,info): return {'identifiers':[f'bacnet_reader_{TARGET_IP}_{device_id}'],'name':info.get('objectName') or f'CPO {device_id}','manufacturer':info.get('vendorName') or 'BACnet','model':info.get('modelName') or 'BACnet/IP','sw_version':info.get('firmwareRevision') or 'unknown'}
+ def sensor(self,device_id,info,key,name,value,attrs=None,binary=False,unit=None,device_class=None,diagnostic=False):
+  component='binary_sensor' if binary else 'sensor'; unique=f"bacnet_{TARGET_IP.replace('.','_')}_{device_id}_{key}"; topic=f'{self.root}/{device_id}/{key}'
+  cfg={'name':name,'unique_id':unique,'state_topic':topic+'/state','device':self.device(device_id,info),'availability_topic':self.availability,'expire_after':max(180,DISCOVERY_INTERVAL*3),'origin':{'name':'BACnet Reader','sw_version':VERSION}}
+  if binary: cfg.update(payload_on='ON',payload_off='OFF')
+  if unit: cfg['unit_of_measurement']=unit; cfg['state_class']='measurement' if device_class not in ('energy','duration') else 'total_increasing' if device_class=='energy' else 'measurement'
+  if device_class: cfg['device_class']=device_class
+  if diagnostic: cfg['entity_category']='diagnostic'
+  if attrs is not None: cfg['json_attributes_topic']=topic+'/attributes'
+  ct=f'homeassistant/{component}/{unique}/config'
+  if self.configs.get(ct)!=cfg and self.publish(ct,cfg,True): self.configs[ct]=cfg
+  if attrs is not None:self.publish(topic+'/attributes',attrs,True)
+  return self.publish(topic+'/state',str(value))
+ def close(self):
+  if self.connected.is_set(): self.client.publish(self.availability,'offline',qos=1,retain=True).wait_for_publish(timeout=3)
+  self.client.disconnect(); self.client.loop_stop()
 
-    def on_connect(self, client, userdata, flags, reason_code, properties):
-        if reason_code.is_failure:
-            log.error("Connexion MQTT refusée : %s", reason_code)
-            return
-        self.configs.clear()
-        self.connected.set()
-        client.publish(self.availability, "online", qos=1, retain=True)
-        log.info("MQTT connecté : publication des entités Home Assistant active.")
+async def device_metadata(bacnet,address,device_id):
+ key=(device_id,'device')
+ if key in metadata_cache:return metadata_cache[key]
+ info={}
+ for prop in ('objectName','vendorName','modelName','firmwareRevision','applicationSoftwareVersion','description','location','vendorIdentifier','protocolVersion','protocolRevision'):
+  v=await read_property_safe(bacnet,address,'device',device_id,prop)
+  if v is not None:info[prop]=str(v)
+ metadata_cache[key]=info; return info
 
-    def on_disconnect(self, client, userdata, flags, reason_code, properties):
-        self.connected.clear()
+async def get_object_list(bacnet,address,device_id,force=False):
+ now=time.monotonic()
+ if not force and device_id in object_cache and now-cache_time.get(device_id,0)<METADATA_REFRESH:return object_cache[device_id]
+ objs=await read_property_safe(bacnet,address,'device',device_id,'objectList')
+ if objs is None:return object_cache.get(device_id,[])
+ parsed=[]
+ for obj in objs:
+  try: parsed.append((str(obj[0]),int(obj[1])))
+  except Exception: pass
+ object_cache[device_id]=parsed; cache_time[device_id]=now; log.info('objectList mis en cache : %s objets.',len(parsed)); return parsed
 
-    def publish(self, topic, payload, retain=False):
-        if not self.connected.is_set():
-            return False
-        if isinstance(payload, dict):
-            payload = json.dumps(payload, ensure_ascii=False, allow_nan=False)
-        return self.client.publish(topic, payload, qos=1, retain=retain).rc == mqtt.MQTT_ERR_SUCCESS
+async def object_metadata(bacnet,address,device_id,obj_type,obj_instance):
+ key=(device_id,obj_type,obj_instance)
+ if key in metadata_cache:return metadata_cache[key]
+ meta={}
+ props=['objectName','description','statusFlags','reliability','outOfService']
+ if obj_type.startswith('analog-'):props.append('units')
+ if obj_type.startswith('multi-state-'):props+=['numberOfStates','stateText']
+ for prop in props:
+  v=await read_property_safe(bacnet,address,obj_type,obj_instance,prop)
+  if v is not None:meta[prop]=str(v) if prop!='stateText' else [str(x) for x in v]
+ meta.setdefault('objectName',f'{obj_type} {obj_instance}'); zone,subsystem,meter=classify(meta['objectName'],meta.get('description',''),meta.get('units','')); meta.update(mct_zone=zone,mct_subsystem=subsystem,meter_candidate=meter)
+ metadata_cache[key]=meta; return meta
 
-    def device(self, device_id, info):
-        return {
-            "identifiers": [f"bacnet_reader_{TARGET_IP}_{device_id}"],
-            "name": info.get("objectName") or f"CPO {device_id}",
-            "manufacturer": info.get("vendorName") or "BACnet",
-            "model": info.get("modelName") or "BACnet/IP",
-            "sw_version": info.get("firmwareRevision") or "unknown",
-        }
-
-    def sensor(self, device_id, info, key, name, value, attrs=None,
-               binary=False, unit=None, device_class=None, diagnostic=False):
-        component = "binary_sensor" if binary else "sensor"
-        unique = f"bacnet_{TARGET_IP.replace('.', '_')}_{device_id}_{key}"
-        topic = f"{self.root}/{device_id}/{key}"
-        config = {
-            "name": name, "unique_id": unique, "state_topic": topic + "/state",
-            "device": self.device(device_id, info),
-            "availability_topic": self.availability,
-            "expire_after": max(180, DISCOVERY_INTERVAL * 3),
-            "origin": {"name": "BACnet Reader", "sw_version": "0.2.0"},
-        }
-        if binary:
-            config.update(payload_on="ON", payload_off="OFF")
-        if unit:
-            config["unit_of_measurement"] = unit
-            if device_class not in ("energy", "duration"):
-                config["state_class"] = "measurement"
-        if device_class:
-            config["device_class"] = device_class
-        if diagnostic:
-            config["entity_category"] = "diagnostic"
-        if attrs is not None:
-            config["json_attributes_topic"] = topic + "/attributes"
-        config_topic = f"homeassistant/{component}/{unique}/config"
-        if self.configs.get(config_topic) != config:
-            if self.publish(config_topic, config, retain=True):
-                self.configs[config_topic] = config
-        if attrs is not None:
-            self.publish(topic + "/attributes", attrs, retain=True)
-        # Do not retain measurements: stale values must not be replayed as fresh.
-        return self.publish(topic + "/state", str(value))
-
-    def close(self):
-        if self.connected.is_set():
-            message = self.client.publish(self.availability, "offline", qos=1, retain=True)
-            message.wait_for_publish(timeout=3)
-        self.client.disconnect()
-        self.client.loop_stop()
-
-
-def normalized_value(obj_type, value):
-    if value is None:
-        return None
-    if obj_type.startswith("binary-"):
-        text = str(value).lower()
-        if text in ("active", "1", "true"):
-            return "ON"
-        if text in ("inactive", "0", "false"):
-            return "OFF"
-        return None
-    try:
-        number = float(value)
-        if not math.isfinite(number):
-            return None
-        return int(number) if obj_type.startswith("multi-state-") else round(number, 4)
-    except (TypeError, ValueError):
-        return None
-
-
-async def device_metadata(bacnet, address, device_id):
-    key = (device_id, "device")
-    if key not in metadata_cache:
-        info = {}
-        for prop in ("objectName", "vendorName", "modelName", "firmwareRevision"):
-            value = await read_property_safe(bacnet, address, "device", device_id, prop)
-            if value is not None:
-                info[prop] = str(value)
-        if info:
-            metadata_cache[key] = info
-        return info
-    return metadata_cache[key]
-
-
-async def inventory_objects(bacnet, address, device_id):
-    started = time.monotonic()
-    info = await device_metadata(bacnet, address, device_id)
-    objects = await read_property_safe(bacnet, address, "device", device_id, "objectList")
-    if objects is None:
-        log.warning("Impossible de récupérer objectList.")
-        return
-    values_read = 0
-    values_published = 0
-    records = []
-    for obj in objects:
-        if not running:
-            return
-        try:
-            obj_type, obj_instance = str(obj[0]), int(obj[1])
-        except (TypeError, ValueError, IndexError):
-            continue
-        cache_key = (device_id, obj_type, obj_instance)
-        meta = metadata_cache.get(cache_key)
-        if meta is None:
-            name = await read_property_safe(bacnet, address, obj_type, obj_instance, "objectName")
-            units = None
-            if obj_type.startswith("analog-"):
-                units = await read_property_safe(bacnet, address, obj_type, obj_instance, "units")
-            meta = {"name": str(name) if name is not None else f"{obj_type} {obj_instance}",
-                    "units": str(units) if units is not None else None}
-            if name is not None:
-                metadata_cache[cache_key] = meta
-        raw = None
-        if obj_type in VALUE_TYPES:
-            raw = await read_property_safe(bacnet, address, obj_type, obj_instance, "presentValue")
-        value = normalized_value(obj_type, raw)
-        timestamp = datetime.now(timezone.utc).isoformat()
-        attrs = {"device_instance": device_id, "object_type": obj_type,
-                 "object_instance": obj_instance, "object_name": meta["name"],
-                 "bacnet_units": meta["units"], "address": address,
-                 "present_value": str(raw) if raw is not None else None,
-                 "last_read": timestamp, "read_only": True}
-        records.append(dict(attrs, value=value))
-        if value is not None:
-            values_read += 1
-            unit, device_class = UNITS.get(meta["units"], (None, None))
-            if bridge.sensor(device_id, info, f"{obj_type}_{obj_instance}", meta["name"],
-                             value, attrs, binary=obj_type.startswith("binary-"),
-                             unit=unit, device_class=device_class):
-                values_published += 1
-        log.debug("OBJECT | %s | %s | %s | value=%s | units=%s",
-                  obj_type, obj_instance, meta["name"], raw, meta["units"])
-        await asyncio.sleep(0.02)
-    timestamp = datetime.now(timezone.utc).isoformat()
-    bridge.sensor(device_id, info, "last_update", "Dernière lecture", timestamp,
-                  device_class="timestamp", diagnostic=True)
-    bridge.sensor(device_id, info, "values_read", "Valeurs lues", values_read, diagnostic=True)
-    bridge.sensor(device_id, info, "object_count", "Objets BACnet", len(objects), diagnostic=True)
-    bridge.sensor(device_id, info, "poll_duration", "Durée de lecture",
-                  round(time.monotonic() - started, 2), unit="s",
-                  device_class="duration", diagnostic=True)
-    try:
-        path = Path("/data/inventory.json")
-        path.with_suffix(".tmp").write_text(json.dumps(
-            {"updated_at": timestamp, "device": info, "objects": records},
-            ensure_ascii=False, indent=2), encoding="utf-8")
-        path.with_suffix(".tmp").replace(path)
-    except OSError:
-        log.warning("Impossible d'enregistrer l'inventaire local.")
-    log.info("Inventaire terminé : %s objets, %s valeurs lues, %s publiées dans Home Assistant.",
-             len(objects), values_read, values_published)
-
+async def inventory_objects(bacnet,address,device_id):
+ started=time.monotonic(); info=await device_metadata(bacnet,address,device_id); objects=await get_object_list(bacnet,address,device_id); records=[]; values_read=published=0; zones={}; meter_candidates=[]
+ for obj_type,obj_instance in objects:
+  if not running:return
+  meta=await object_metadata(bacnet,address,device_id,obj_type,obj_instance); raw=await read_property_safe(bacnet,address,obj_type,obj_instance,'presentValue') if obj_type in VALUE_TYPES else None; value=normalized_value(obj_type,raw); stamp=datetime.now(timezone.utc).isoformat(); zone=meta['mct_zone']; zones[zone]=zones.get(zone,0)+1
+  attrs={'device_instance':device_id,'object_type':obj_type,'object_instance':obj_instance,'object_name':meta['objectName'],'description':meta.get('description'),'bacnet_units':meta.get('units'),'status_flags':meta.get('statusFlags'),'reliability':meta.get('reliability'),'out_of_service':meta.get('outOfService'),'number_of_states':meta.get('numberOfStates'),'state_text':meta.get('stateText'),'mct_zone':zone,'mct_subsystem':meta['mct_subsystem'],'meter_candidate':meta['meter_candidate'],'address':address,'present_value':text(raw),'last_read':stamp,'read_only':True}
+  records.append(dict(attrs,value=value))
+  if meta['meter_candidate']:meter_candidates.append({'type':obj_type,'instance':obj_instance,'name':meta['objectName'],'units':meta.get('units')})
+  if value is not None:
+   values_read+=1; unit,dc=UNITS.get(meta.get('units'),(None,None)); friendly=f"{zone} · {meta['objectName']}" if zone!='Technique BACnet' else meta['objectName']
+   if bridge.sensor(device_id,info,f'{obj_type}_{obj_instance}',friendly,value,attrs,binary=obj_type.startswith('binary-'),unit=unit,device_class=dc):published+=1
+  await asyncio.sleep(POLL_DELAY)
+ stamp=datetime.now(timezone.utc).isoformat(); duration=round(time.monotonic()-started,2)
+ bridge.sensor(device_id,info,'last_update','Dernière lecture',stamp,device_class='timestamp',diagnostic=True); bridge.sensor(device_id,info,'values_read','Valeurs lues',values_read,diagnostic=True); bridge.sensor(device_id,info,'object_count','Objets BACnet',len(objects),diagnostic=True); bridge.sensor(device_id,info,'poll_duration','Durée de lecture',duration,unit='s',device_class='duration',diagnostic=True)
+ payload={'version':VERSION,'updated_at':stamp,'device':info,'summary':{'object_count':len(objects),'values_read':values_read,'published':published,'zones':zones,'meter_candidates':meter_candidates},'objects':records}
+ try:
+  p=Path('/data/inventory.json'); tmp=p.with_suffix('.tmp'); tmp.write_text(json.dumps(payload,ensure_ascii=False,indent=2),encoding='utf-8'); tmp.replace(p)
+ except OSError:log.warning("Impossible d'enregistrer l'inventaire local.")
+ log.info('Inventaire : %s objets, %s valeurs, %s publiées, %.2fs.',len(objects),values_read,published,duration); log.info('Classification MCT : %s',zones); log.info('Candidats comptage M-Bus/Modbus : %s',len(meter_candidates))
 
 def normalize_discovered_device(device):
-    """
-    BAC0 peut faire évoluer légèrement la représentation
-    des équipements découverts.
+ try:
+  if hasattr(device,'iAmDeviceIdentifier'):return str(device.pduSource),int(device.iAmDeviceIdentifier[1])
+  if isinstance(device,(tuple,list)) and len(device)>=2:return str(device[0]),int(device[1])
+  if isinstance(device,dict):
+   a=device.get('address') or device.get('Address') or device.get('ip'); d=device.get('device_id') or device.get('deviceId') or device.get('instance')
+   if a is not None and d is not None:return str(a),int(d)
+ except Exception:pass
+ return None,None
 
-    On évite donc de supposer un format unique.
-    """
-
-    try:
-
-        if hasattr(device, "iAmDeviceIdentifier"):
-            return str(device.pduSource), int(device.iAmDeviceIdentifier[1])
-
-        if isinstance(device, (tuple, list)):
-
-            if len(device) >= 2:
-                return str(device[0]), int(device[1])
-
-        if isinstance(device, dict):
-
-            address = (
-                device.get("address")
-                or device.get("Address")
-                or device.get("ip")
-            )
-
-            device_id = (
-                device.get("device_id")
-                or device.get("deviceId")
-                or device.get("instance")
-            )
-
-            if address is not None and device_id is not None:
-                return str(address), int(device_id)
-
-    except Exception:
-        pass
-
-    return None, None
-
+async def inspect_device(bacnet,address,device_id):
+ info=await device_metadata(bacnet,address,device_id); log.info('Équipement BACnet : %s / Device %s / %s / %s',address,device_id,info.get('objectName'),info.get('modelName'))
 
 async def discovery_cycle(bacnet):
-    log.info("")
-    log.info("========== BACnet discovery ==========")
-    log.info("Envoi Who-Is...")
-
-    try:
-        discovered = await bacnet.who_is(
-            address=f"{TARGET_IP}:{BACNET_PORT}", timeout=5
-        )
-
-    except Exception as err:
-        log.warning("Who-Is : %s", err)
-        return
-
-    if not discovered:
-        log.warning("Aucun équipement BACnet découvert.")
-        return
-
-    log.info(
-        "%s équipement(s) découvert(s).",
-        len(discovered),
-    )
-
-    target_found = False
-
-    for device in discovered:
-
-        log.debug("Réponse brute : %r", device)
-
-        address, device_id = normalize_discovered_device(device)
-
-        if address is None:
-            log.warning(
-                "Réponse BACnet non interprétée : %r",
-                device,
-            )
-            continue
-
-        await inspect_device(
-            bacnet,
-            address,
-            device_id,
-        )
-
-        # Certains stacks renvoient adresse:port.
-        clean_address = address.split(":")[0]
-
-        if clean_address == TARGET_IP:
-
-            target_found = True
-
-            log.info("")
-            log.info("**************************************")
-            log.info(" CIBLE BACnet TROUVÉE : %s", TARGET_IP)
-            log.info("**************************************")
-
-            await inventory_objects(
-                bacnet,
-                address,
-                device_id,
-            )
-
-    if not target_found:
-
-        log.warning(
-            "Le contrôleur cible %s n'a pas encore "
-            "été identifié parmi les réponses.",
-            TARGET_IP,
-        )
-
+ log.info('========== BACnet discovery ==========')
+ try: discovered=await bacnet.who_is(address=f'{TARGET_IP}:{BACNET_PORT}',timeout=5)
+ except Exception as err:log.warning('Who-Is : %s',err);return
+ if not discovered:log.warning('Aucun équipement BACnet découvert.');return
+ target=False
+ for dev in discovered:
+  address,device_id=normalize_discovered_device(dev)
+  if address is None:continue
+  await inspect_device(bacnet,address,device_id)
+  if address.split(':')[0]==TARGET_IP:
+   target=True; log.info('CIBLE BACnet TROUVÉE : %s',TARGET_IP); await inventory_objects(bacnet,address,device_id)
+ if not target:log.warning("La cible %s n'a pas été identifiée.",TARGET_IP)
 
 async def main():
-    global bridge
-
-    log.info("BACnet Reader démarré.")
-    log.info("VERSION : 0.2.0")
-    log.info("MODE    : READ ONLY")
-
-    if not test_ip_connectivity():
-        sys.exit(1)
-
-    log.info(
-        "Ouverture BACnet/IP sur %s",
-        LOCAL_IP,
-    )
-
-    while running and bridge is None:
-        try:
-            bridge = await asyncio.to_thread(MQTTBridge)
-        except Exception as err:
-            log.warning("MQTT pas encore prêt (%s), nouvelle tentative dans 15 s.", type(err).__name__)
-            for _ in range(15):
-                if not running:
-                    return
-                await asyncio.sleep(1)
-
-    try:
-
-        async with BAC0.start(
-            ip=LOCAL_IP, port=BACNET_PORT
-        ) as bacnet:
-
-            log.info("BACnet/IP initialisé.")
-            log.info(
-                "Recherche de la cible %s...",
-                TARGET_IP,
-            )
-
-            while running:
-
-                try:
-                    await discovery_cycle(bacnet)
-
-                except Exception:
-                    log.exception(
-                        "Erreur pendant le cycle de découverte."
-                    )
-
-                for _ in range(DISCOVERY_INTERVAL):
-
-                    if not running:
-                        break
-
-                    await asyncio.sleep(1)
-
-    except Exception:
-        log.exception(
-            "Impossible d'initialiser BACnet/IP."
-        )
-        sys.exit(2)
-
-    finally:
-        if bridge is not None:
-            await asyncio.to_thread(bridge.close)
-
-    log.info("BACnet Reader arrêté.")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+ global bridge
+ log.info('BACnet Reader %s démarré. MODE : READ ONLY',VERSION)
+ if not test_ip_connectivity():sys.exit(1)
+ while running and bridge is None:
+  try:bridge=await asyncio.to_thread(MQTTBridge)
+  except Exception as err:log.warning('MQTT pas encore prêt (%s), nouvelle tentative dans 15 s.',type(err).__name__);await asyncio.sleep(15)
+ try:
+  async with BAC0.start(ip=LOCAL_IP,port=BACNET_PORT) as bacnet:
+   while running:
+    try:await discovery_cycle(bacnet)
+    except Exception:log.exception('Erreur pendant le cycle de découverte.')
+    for _ in range(DISCOVERY_INTERVAL):
+     if not running:break
+     await asyncio.sleep(1)
+ except Exception:log.exception("Impossible d'initialiser BACnet/IP.");sys.exit(2)
+ finally:
+  if bridge is not None:await asyncio.to_thread(bridge.close)
+if __name__=='__main__':asyncio.run(main())

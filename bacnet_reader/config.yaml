@@ -1,29 +1,28 @@
-name: BACnet Reader
-version: "0.1.0"
+name: BACnet Reader MCT
+version: "0.3.0"
 slug: bacnet-reader
-description: "Diagnostic BACnet/IP en lecture seule pour Home Assistant"
+description: "Supervision BACnet/IP MCT - Phase 1 en lecture seule"
 url: "https://github.com/ycvgcz6jc6-dev/bacnet1"
-arch:
-  - amd64
-  - aarch64
-
+arch: [amd64, aarch64]
 startup: services
 boot: auto
 init: false
 host_network: true
-
 options:
   local_ip: "192.168.0.39/24"
   target_ip: "192.168.0.249"
   bacnet_port: 47808
   discovery_interval: 60
+  metadata_refresh: 1800
+  poll_delay: 0.02
   read_device_info: true
   log_level: "INFO"
-
 schema:
   local_ip: str
   target_ip: str
   bacnet_port: port
   discovery_interval: int
+  metadata_refresh: int
+  poll_delay: float
   read_device_info: bool
   log_level: list(DEBUG|INFO|WARNING|ERROR)
