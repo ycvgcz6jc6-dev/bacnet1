@@ -4,7 +4,7 @@ from pathlib import Path
 import BAC0
 import paho.mqtt.client as mqtt
 
-VERSION='0.3.0-phase1'
+VERSION='0.3.1-phase1'
 LOCAL_IP=os.getenv('LOCAL_IP','192.168.0.39/24'); TARGET_IP=os.getenv('TARGET_IP','192.168.0.249')
 BACNET_PORT=int(os.getenv('BACNET_PORT','47808')); DISCOVERY_INTERVAL=int(os.getenv('DISCOVERY_INTERVAL','60'))
 METADATA_REFRESH=int(os.getenv('METADATA_REFRESH','1800')); POLL_DELAY=float(os.getenv('POLL_DELAY','0.02'))
