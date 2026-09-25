@@ -140,7 +140,17 @@ async def inventory_objects(bacnet, address, device_id):
 
     log.info("Nombre/objet(s) retourné(s) : %s", len(objects))
 
+    values_read = 0
+    value_types = {
+        "analog-input", "analog-output", "analog-value",
+        "binary-input", "binary-output", "binary-value",
+        "multi-state-input", "multi-state-output", "multi-state-value",
+    }
+
     for obj in objects:
+
+        if not running:
+            return
 
         try:
             obj_type = obj[0]
@@ -157,21 +167,19 @@ async def inventory_objects(bacnet, address, device_id):
             "objectName",
         )
 
-        present_value = await read_property_safe(
-            bacnet,
-            address,
-            obj_type,
-            obj_instance,
-            "presentValue",
-        )
+        present_value = None
+        units = None
+        if str(obj_type) in value_types:
+            present_value = await read_property_safe(
+                bacnet, address, obj_type, obj_instance, "presentValue"
+            )
+            if present_value is not None:
+                values_read += 1
 
-        units = await read_property_safe(
-            bacnet,
-            address,
-            obj_type,
-            obj_instance,
-            "units",
-        )
+        if str(obj_type).startswith("analog-"):
+            units = await read_property_safe(
+                bacnet, address, obj_type, obj_instance, "units"
+            )
 
         log.info(
             "OBJECT | %-20s | %6s | %-35s | value=%s | units=%s",
@@ -182,6 +190,9 @@ async def inventory_objects(bacnet, address, device_id):
             units,
         )
 
+        await asyncio.sleep(0.02)
+
+    log.info("Inventaire terminé : %s objets, %s valeurs lues.", len(objects), values_read)
 
 def normalize_discovered_device(device):
     """
