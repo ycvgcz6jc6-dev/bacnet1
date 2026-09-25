@@ -1,5 +1,5 @@
 name: BACnet Reader MCT
-version: "0.3.1"
+version: "0.3.2"
 slug: bacnet-reader
 description: "Supervision BACnet/IP MCT - Phase 1 en lecture seule"
 url: "https://github.com/ycvgcz6jc6-dev/bacnet1"
@@ -8,6 +8,8 @@ startup: services
 boot: auto
 init: false
 host_network: true
+services:
+  - mqtt:want
 options:
   local_ip: "192.168.0.39/24"
   target_ip: "192.168.0.249"

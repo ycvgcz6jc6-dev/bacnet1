@@ -4,13 +4,13 @@ from pathlib import Path
 import BAC0
 import paho.mqtt.client as mqtt
 
-VERSION='0.3.1-phase1'
+VERSION='0.3.2-phase1'
 LOCAL_IP=os.getenv('LOCAL_IP','192.168.0.39/24'); TARGET_IP=os.getenv('TARGET_IP','192.168.0.249')
 BACNET_PORT=int(os.getenv('BACNET_PORT','47808')); DISCOVERY_INTERVAL=int(os.getenv('DISCOVERY_INTERVAL','60'))
 METADATA_REFRESH=int(os.getenv('METADATA_REFRESH','1800')); POLL_DELAY=float(os.getenv('POLL_DELAY','0.02'))
 READ_DEVICE_INFO=os.getenv('READ_DEVICE_INFO','true').lower() in ('1','true','yes'); LOG_LEVEL=os.getenv('LOG_LEVEL','INFO').upper()
 logging.basicConfig(level=getattr(logging,LOG_LEVEL,logging.INFO),format='%(asctime)s | %(levelname)s | %(message)s'); log=logging.getLogger('BACnetReader')
-running=True; bridge=None; metadata_cache={}; object_cache={}; cache_time={}
+running=True; bridge=None; metadata_cache={}; object_cache={}; cache_time={}; metadata_time={}
 VALUE_TYPES={'analog-input','analog-output','analog-value','binary-input','binary-output','binary-value','multi-state-input','multi-state-output','multi-state-value'}
 META_PROPS=('objectName','description','units','statusFlags','reliability','outOfService')
 UNITS={'degrees-celsius':('°C','temperature'),'percent':('%',None),'percent-relative-humidity':('%','humidity'),'pascals':('Pa','pressure'),'kilopascals':('kPa','pressure'),'watts':('W','power'),'kilowatts':('kW','power'),'watt-hours':('Wh','energy'),'kilowatt-hours':('kWh','energy'),'cubic-meters-per-hour':('m³/h','volume_flow_rate'),'liters-per-second':('L/s','volume_flow_rate'),'seconds':('s','duration'),'minutes':('min','duration'),'hours':('h','duration')}
@@ -54,6 +54,22 @@ def normalized_value(obj_type,value):
   return int(n) if obj_type.startswith('multi-state-') else round(n,4)
  except (TypeError,ValueError): return str(value) if obj_type.startswith('multi-state-') else None
 
+class OfflineBridge:
+ def sensor(self,*args,**kwargs): return False
+ def close(self): pass
+
+async def mqtt_worker():
+ global bridge
+ while running:
+  try:
+   bridge=await asyncio.to_thread(MQTTBridge)
+   return
+  except Exception as err:
+   log.warning('MQTT indisponible (%s) ; BACnet continue en lecture seule.',type(err).__name__)
+  for _ in range(15):
+   if not running:return
+   await asyncio.sleep(1)
+
 class MQTTBridge:
  def __init__(self):
   req=urllib.request.Request('http://supervisor/services/mqtt',headers={'Authorization':'Bearer '+os.environ['SUPERVISOR_TOKEN']})
@@ -91,12 +107,12 @@ class MQTTBridge:
 
 async def device_metadata(bacnet,address,device_id):
  key=(device_id,'device')
- if key in metadata_cache:return metadata_cache[key]
+ if key in metadata_cache and time.monotonic()-metadata_time.get(key,0)<METADATA_REFRESH:return metadata_cache[key]
  info={}
  for prop in ('objectName','vendorName','modelName','firmwareRevision','applicationSoftwareVersion','description','location','vendorIdentifier','protocolVersion','protocolRevision'):
   v=await read_property_safe(bacnet,address,'device',device_id,prop)
   if v is not None:info[prop]=str(v)
- metadata_cache[key]=info; return info
+ metadata_cache[key]=info; metadata_time[key]=time.monotonic(); return info
 
 async def get_object_list(bacnet,address,device_id,force=False):
  now=time.monotonic()
@@ -111,7 +127,7 @@ async def get_object_list(bacnet,address,device_id,force=False):
 
 async def object_metadata(bacnet,address,device_id,obj_type,obj_instance):
  key=(device_id,obj_type,obj_instance)
- if key in metadata_cache:return metadata_cache[key]
+ if key in metadata_cache and time.monotonic()-metadata_time.get(key,0)<METADATA_REFRESH:return metadata_cache[key]
  meta={}
  props=['objectName','description','statusFlags','reliability','outOfService']
  if obj_type.startswith('analog-'):props.append('units')
@@ -120,7 +136,7 @@ async def object_metadata(bacnet,address,device_id,obj_type,obj_instance):
   v=await read_property_safe(bacnet,address,obj_type,obj_instance,prop)
   if v is not None:meta[prop]=str(v) if prop!='stateText' else [str(x) for x in v]
  meta.setdefault('objectName',f'{obj_type} {obj_instance}'); zone,subsystem,meter=classify(meta['objectName'],meta.get('description',''),meta.get('units','')); meta.update(mct_zone=zone,mct_subsystem=subsystem,meter_candidate=meter)
- metadata_cache[key]=meta; return meta
+ metadata_cache[key]=meta; metadata_time[key]=time.monotonic(); return meta
 
 async def inventory_objects(bacnet,address,device_id):
  started=time.monotonic(); info=await device_metadata(bacnet,address,device_id); objects=await get_object_list(bacnet,address,device_id); records=[]; values_read=published=0; zones={}; meter_candidates=[]
@@ -170,12 +186,11 @@ async def discovery_cycle(bacnet):
  if not target:log.warning("La cible %s n'a pas été identifiée.",TARGET_IP)
 
 async def main():
- global bridge
+ global bridge,running
  log.info('BACnet Reader %s démarré. MODE : READ ONLY',VERSION)
  if not test_ip_connectivity():sys.exit(1)
- while running and bridge is None:
-  try:bridge=await asyncio.to_thread(MQTTBridge)
-  except Exception as err:log.warning('MQTT pas encore prêt (%s), nouvelle tentative dans 15 s.',type(err).__name__);await asyncio.sleep(15)
+ bridge=OfflineBridge()
+ mqtt_task=asyncio.create_task(mqtt_worker())
  try:
   async with BAC0.start(ip=LOCAL_IP,port=BACNET_PORT) as bacnet:
    while running:
@@ -186,5 +201,7 @@ async def main():
      await asyncio.sleep(1)
  except Exception:log.exception("Impossible d'initialiser BACnet/IP.");sys.exit(2)
  finally:
+  running=False
+  await mqtt_task
   if bridge is not None:await asyncio.to_thread(bridge.close)
 if __name__=='__main__':asyncio.run(main())
