@@ -1,5 +1,5 @@
 name: BACnet Reader MCT
-version: "0.3.0"
+version: "0.3.1"
 slug: bacnet-reader
 description: "Supervision BACnet/IP MCT - Phase 1 en lecture seule"
 url: "https://github.com/ycvgcz6jc6-dev/bacnet1"
