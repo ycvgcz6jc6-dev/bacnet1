@@ -9,5 +9,6 @@ COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
 COPY run.sh /run.sh
 COPY bacnet_reader.py /bacnet_reader.py
+COPY phase2.py mct.html /
 RUN chmod a+x /run.sh
 CMD ["/run.sh"]

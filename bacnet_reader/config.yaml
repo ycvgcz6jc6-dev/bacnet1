@@ -1,13 +1,17 @@
 name: BACnet Reader MCT
-version: "0.3.2"
+version: "0.4.0"
 slug: bacnet-reader
-description: "Supervision BACnet/IP MCT - Phase 1 en lecture seule"
+description: "Supervision BACnet/IP MCT - Phase 2 en lecture seule"
 url: "https://github.com/ycvgcz6jc6-dev/bacnet1"
 arch: [amd64, aarch64]
 startup: services
 boot: auto
 init: false
 host_network: true
+ingress: true
+ingress_port: 8098
+panel_title: CPO MCT
+panel_icon: mdi:office-building-cog
 services:
   - mqtt:want
 options:
@@ -19,6 +23,14 @@ options:
   poll_delay: 0.02
   read_device_info: true
   log_level: "INFO"
+  phase2_enabled: true
+  target_device_id: 130
+  normal_interval: 30
+  active_interval: 2
+  active_timeout: 15
+  read_timeout: 15
+  stale_after: 180
+  max_read_rate: 20
 schema:
   local_ip: str
   target_ip: str
@@ -28,3 +40,11 @@ schema:
   poll_delay: float
   read_device_info: bool
   log_level: list(DEBUG|INFO|WARNING|ERROR)
+  phase2_enabled: bool
+  target_device_id: int(0,4194302)
+  normal_interval: int(10,300)
+  active_interval: int(2,30)
+  active_timeout: int(10,60)
+  read_timeout: int(5,30)
+  stale_after: int(60,3600)
+  max_read_rate: int(1,30)

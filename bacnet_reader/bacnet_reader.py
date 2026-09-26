@@ -4,13 +4,14 @@ from pathlib import Path
 import BAC0
 import paho.mqtt.client as mqtt
 
-VERSION='0.3.2-phase1'
+VERSION='0.4.0-phase2'
 LOCAL_IP=os.getenv('LOCAL_IP','192.168.0.39/24'); TARGET_IP=os.getenv('TARGET_IP','192.168.0.249')
 BACNET_PORT=int(os.getenv('BACNET_PORT','47808')); DISCOVERY_INTERVAL=int(os.getenv('DISCOVERY_INTERVAL','60'))
 METADATA_REFRESH=int(os.getenv('METADATA_REFRESH','1800')); POLL_DELAY=float(os.getenv('POLL_DELAY','0.02'))
 READ_DEVICE_INFO=os.getenv('READ_DEVICE_INFO','true').lower() in ('1','true','yes'); LOG_LEVEL=os.getenv('LOG_LEVEL','INFO').upper()
 logging.basicConfig(level=getattr(logging,LOG_LEVEL,logging.INFO),format='%(asctime)s | %(levelname)s | %(message)s'); log=logging.getLogger('BACnetReader')
 running=True; bridge=None; metadata_cache={}; object_cache={}; cache_time={}; metadata_time={}
+read_gate=None
 VALUE_TYPES={'analog-input','analog-output','analog-value','binary-input','binary-output','binary-value','multi-state-input','multi-state-output','multi-state-value'}
 META_PROPS=('objectName','description','units','statusFlags','reliability','outOfService')
 UNITS={'degrees-celsius':('°C','temperature'),'percent':('%',None),'percent-relative-humidity':('%','humidity'),'pascals':('Pa','pressure'),'kilopascals':('kPa','pressure'),'watts':('W','power'),'kilowatts':('kW','power'),'watt-hours':('Wh','energy'),'kilowatt-hours':('kWh','energy'),'cubic-meters-per-hour':('m³/h','volume_flow_rate'),'liters-per-second':('L/s','volume_flow_rate'),'seconds':('s','duration'),'minutes':('min','duration'),'hours':('h','duration')}
@@ -26,7 +27,8 @@ def test_ip_connectivity():
  except OSError: log.error('Adresse cible invalide : %s',TARGET_IP); return False
 
 async def read_property_safe(bacnet,address,obj,instance,prop):
- try: return await bacnet.read(f'{address} {obj} {instance} {prop}')
+ if read_gate is not None:return await read_gate.read(bacnet,address,obj,instance,prop)
+ try: return await asyncio.wait_for(bacnet.read(f'{address} {obj} {instance} {prop}'),15)
  except Exception as err: log.debug('Lecture impossible [%s %s %s %s]: %s',address,obj,instance,prop,err); return None
 
 def text(v): return None if v is None else str(v)
@@ -91,9 +93,11 @@ class MQTTBridge:
  def device(self,device_id,info): return {'identifiers':[f'bacnet_reader_{TARGET_IP}_{device_id}'],'name':info.get('objectName') or f'CPO {device_id}','manufacturer':info.get('vendorName') or 'BACnet','model':info.get('modelName') or 'BACnet/IP','sw_version':info.get('firmwareRevision') or 'unknown'}
  def sensor(self,device_id,info,key,name,value,attrs=None,binary=False,unit=None,device_class=None,diagnostic=False):
   component='binary_sensor' if binary else 'sensor'; unique=f"bacnet_{TARGET_IP.replace('.','_')}_{device_id}_{key}"; topic=f'{self.root}/{device_id}/{key}'
-  cfg={'name':name,'unique_id':unique,'state_topic':topic+'/state','device':self.device(device_id,info),'availability_topic':self.availability,'expire_after':max(180,DISCOVERY_INTERVAL*3),'origin':{'name':'BACnet Reader','sw_version':VERSION}}
+  cfg={'name':name,'unique_id':unique,'state_topic':topic+'/state','device':self.device(device_id,info),'availability_topic':self.availability,'expire_after':int(os.getenv('STALE_AFTER','180')),'origin':{'name':'BACnet Reader','sw_version':VERSION}}
   if binary: cfg.update(payload_on='ON',payload_off='OFF')
-  if unit: cfg['unit_of_measurement']=unit; cfg['state_class']='measurement' if device_class not in ('energy','duration') else 'total_increasing' if device_class=='energy' else 'measurement'
+  if unit:
+   cfg['unit_of_measurement']=unit
+   if device_class!='energy':cfg['state_class']='measurement'
   if device_class: cfg['device_class']=device_class
   if diagnostic: cfg['entity_category']='diagnostic'
   if attrs is not None: cfg['json_attributes_topic']=topic+'/attributes'
@@ -186,13 +190,18 @@ async def discovery_cycle(bacnet):
  if not target:log.warning("La cible %s n'a pas été identifiée.",TARGET_IP)
 
 async def main():
- global bridge,running
+ global bridge,running,read_gate
  log.info('BACnet Reader %s démarré. MODE : READ ONLY',VERSION)
  if not test_ip_connectivity():sys.exit(1)
  bridge=OfflineBridge()
  mqtt_task=asyncio.create_task(mqtt_worker())
  try:
   async with BAC0.start(ip=LOCAL_IP,port=BACNET_PORT) as bacnet:
+   if os.getenv('PHASE2_ENABLED','true').lower() in ('true','1','yes'):
+    from phase2 import Supervisor
+    supervisor=Supervisor(sys.modules[__name__])
+    read_gate=supervisor.gate
+    await supervisor.run(bacnet)
    while running:
     try:await discovery_cycle(bacnet)
     except Exception:log.exception('Erreur pendant le cycle de découverte.')

@@ -17,6 +17,7 @@ spec.loader.exec_module(reader)
 class PhaseOneTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         reader.running = True
+        reader.read_gate = None
         reader.metadata_cache.clear()
         reader.metadata_time.clear()
         reader.object_cache.clear()
@@ -33,7 +34,7 @@ class PhaseOneTests(unittest.IsolatedAsyncioTestCase):
             calls.append('inventory')
             await asyncio.sleep(0)
             reader.running = False
-        with patch.object(reader.BAC0, 'start', return_value=Context(), create=True), patch.object(reader, 'MQTTBridge', side_effect=RuntimeError('offline')), patch.object(reader, 'discovery_cycle', cycle):
+        with patch.dict(reader.os.environ, {'PHASE2_ENABLED': 'false'}), patch.object(reader.BAC0, 'start', return_value=Context(), create=True), patch.object(reader, 'MQTTBridge', side_effect=RuntimeError('offline')), patch.object(reader, 'discovery_cycle', cycle):
             await asyncio.wait_for(reader.main(), 3)
         self.assertEqual(calls, ['bacnet_started', 'inventory'])
 
