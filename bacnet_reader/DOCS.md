@@ -1,3 +1,9 @@
+# MCT — Phase 3, exploitation en lecture seule
+
+La version 0.5.0 ajoute le panneau exploitation. Voir [le périmètre et la recette Phase 3](PHASE3.md). La console d’inspection Phase 2 reste accessible via le lien « Console Phase 2 ». Le logo officiel et les trois photos sont désormais inclus sans modification des fichiers originaux.
+
+---
+
 # MCT — Phase 2, lecture seule
 
 La version 0.4.0 conserve les identifiants des entités et topics MQTT existants, l’inventaire `/data/inventory.json`, la classification et les candidats M-Bus/Modbus. La publication MQTT reste facultative. Le mode historique est conservé via `phase2_enabled: false`.

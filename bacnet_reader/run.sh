@@ -4,5 +4,5 @@ for key in local_ip target_ip bacnet_port discovery_interval metadata_refresh po
   env_name=$(echo "$key" | tr '[:lower:]' '[:upper:]')
   export "$env_name"="$(bashio::config "$key")"
 done
-bashio::log.info "BACnet Reader MCT 0.4.0-phase2 — READ ONLY"
+bashio::log.info "BACnet Reader MCT 0.5.0-phase3 — READ ONLY"
 exec python3 -u /bacnet_reader.py

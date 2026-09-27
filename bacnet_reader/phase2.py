@@ -8,6 +8,7 @@ from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
+from phase3 import asset, ZONE_CAPABILITIES
 try:
     from bacpypes3.apdu import ErrorRejectAbortNack as BACnetError
 except ImportError:
@@ -99,6 +100,13 @@ class ReadGate:
         self.last_success = None
         self.backoff_until = 0
         self.last_error = None
+        self.measurements = deque(maxlen=2400)
+
+    def metrics(self):
+        now = time.monotonic()
+        recent = [(t, ms) for t, ms in self.measurements if now-t < 60]
+        return {'reads_per_second': round(len(recent)/60, 2),
+                'mean_read_ms': round(sum(ms for _, ms in recent)/len(recent), 1) if recent else None}
 
     async def read(self, bacnet, address, kind, instance, prop):
         async with self.lock:
@@ -122,10 +130,12 @@ class ReadGate:
                 self.last_success = utcnow()
                 self.failures = 0
                 self.last_error = None
+                self.measurements.append((time.monotonic(), (time.monotonic()-started)*1000))
                 # Slow controllers reduce the request rate even with successful reads.
                 self.next_request = time.monotonic()+max(1/self.rate, min(2, (time.monotonic()-started)/2))
                 return result
             except (Exception, BACnetError) as error:
+                self.measurements.append((time.monotonic(), (time.monotonic()-started)*1000))
                 message = (type(error).__name__+' '+str(getattr(error, 'reason', error))).lower().replace('-', '').replace('_', '').replace(' ', '')
                 optional = any(s in message for s in ('unknownproperty', 'unknownobject', 'propertyisnotanarray'))
                 if optional:
@@ -312,6 +322,7 @@ class Supervisor:
             zones[rec['mct_zone']] = zones.get(rec['mct_zone'], 0)+1
         return {'version': self.r.VERSION, 'updated_at': utcnow(), 'device': self.info,
             'device_instance': self.device_id, 'read_only': True, 'zones': ZONES,
+            'zone_capabilities': ZONE_CAPABILITIES,
             'summary': {'object_count': len(objects), 'values_read': len(self.last_good),
                 'available_values': sum(x['available'] for x in objects),
                 'zones': zones, 'published': self.published,
@@ -322,6 +333,7 @@ class Supervisor:
                 'mqtt_connected': bool(getattr(self.r.bridge, 'connected', None) and self.r.bridge.connected.is_set()),
                 'active_points': len(active), 'active_clients': len(self.views.clients),
                 'normal_interval': self.normal, 'active_interval': self.fast,
+                'stale_after': self.stale, 'poll_duration': self.poll_duration, **self.gate.metrics(),
                 'metadata_interval': self.r.METADATA_REFRESH, 'read_timeout': self.gate.timeout,
                 'max_read_rate': self.gate.rate, 'backoff_seconds': max(0, round(self.gate.backoff_until-time.monotonic(), 1))},
             'objects': objects}
@@ -417,9 +429,10 @@ class Supervisor:
                 if length < 0 or length > 16384 or 'transfer-encoding' in headers:
                     raise ValueError('request too large')
                 path = urlsplit(target).path
-                if method == 'GET' and path == '/':
-                    body = Path(__file__).with_name('mct.html').read_bytes()
-                    status, mime = '200 OK', 'text/html; charset=utf-8'
+                static = asset(path) if method == 'GET' else None
+                if static is not None:
+                    mime, body = static
+                    status = '200 OK'
                 elif method == 'GET' and path in ('/api/inventory', '/inventory.json'):
                     body = json.dumps(self.snapshot(), ensure_ascii=False, allow_nan=False).encode()
                     status, mime = '200 OK', 'application/json; charset=utf-8'

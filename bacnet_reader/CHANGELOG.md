@@ -1,3 +1,11 @@
+# 0.5.0
+
+- Panneau exploitation sombre avec logo/photos MCT originaux ; console Phase 2 conservée séparément.
+- Vues espaces/installations, alarmes horodatées, horaires bruts, Explorer filtrable et diagnostics de lecture.
+- Libellés issus du CPO, fraîcheur configurable, état global prudent et heartbeat des seuls points visibles.
+- Architecture de capacités future désactivée ; aucune commande BACnet.
+- Ressources locales servies via allowlist Ingress ; tests de non-régression et de présentation.
+
 # 0.4.0
 
 - Phase 2 READ ONLY : collecte enrichie horodatée, textes d’état CPO sans substitutions, objets techniques conservés et export JSON privé via Ingress HA.
