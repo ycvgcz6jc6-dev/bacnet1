@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 from phase3 import asset, ZONE_CAPABILITIES
+from command_audit import audit_properties, evidence
 try:
     from bacpypes3.apdu import ErrorRejectAbortNack as BACnetError
 except ImportError:
@@ -82,6 +83,7 @@ def properties_for(kind):
     if kind.startswith('multi-state-'):
         props.extend(('numberOfStates', 'stateText'))
     props.extend(TECHNICAL.get(kind, ()))
+    props.extend(audit_properties(kind))
     return props
 
 
@@ -315,7 +317,8 @@ class Supervisor:
     def snapshot(self):
         objects = []
         for rec in self.records.values():
-            objects.append(dict(self.attributes(rec), metadata=rec['metadata']))
+            objects.append(dict(self.attributes(rec), metadata=rec['metadata'],
+                                command_audit=evidence(rec, max_age=self.r.METADATA_REFRESH+60)))
         active = self.views.active()
         zones = {}
         for rec in objects:

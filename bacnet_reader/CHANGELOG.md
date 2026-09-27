@@ -1,3 +1,8 @@
+# 0.5.1 — préparation Phase 4
+
+- Audit READ ONLY des tableaux de priorités et valeurs de repli.
+- Export des preuves horodatées, aucune écriture autorisée.
+
 # 0.5.0
 
 - Panneau exploitation sombre avec logo/photos MCT originaux ; console Phase 2 conservée séparément.

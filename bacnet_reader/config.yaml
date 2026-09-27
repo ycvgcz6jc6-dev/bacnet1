@@ -1,5 +1,5 @@
 name: BACnet Reader MCT
-version: "0.5.0"
+version: "0.5.1"
 slug: bacnet-reader
 description: "Exploitation MCT - Phase 3 en lecture seule"
 url: "https://github.com/ycvgcz6jc6-dev/bacnet1"
