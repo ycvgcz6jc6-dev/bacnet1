@@ -10,7 +10,7 @@ RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
 COPY run.sh /run.sh
 COPY bacnet_reader.py /bacnet_reader.py
 COPY phase2.py mct.html /
-COPY command_audit.py /
+COPY command_audit.py zone_averages.py /
 COPY phase3.py exploitation.html exploitation.css exploitation.js presentation.js /
 COPY assets /assets
 RUN chmod a+x /run.sh

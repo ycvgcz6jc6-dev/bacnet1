@@ -1,5 +1,5 @@
 name: BACnet Reader MCT
-version: "0.5.1"
+version: "0.5.2"
 slug: bacnet-reader
 description: "Exploitation MCT - Phase 3 en lecture seule"
 url: "https://github.com/ycvgcz6jc6-dev/bacnet1"
@@ -15,6 +15,7 @@ panel_icon: mdi:office-building-cog
 services:
   - mqtt:want
 options:
+  average_groups_json: ""
   local_ip: "192.168.0.39/24"
   target_ip: "192.168.0.249"
   bacnet_port: 47808
@@ -32,6 +33,7 @@ options:
   stale_after: 180
   max_read_rate: 20
 schema:
+  average_groups_json: str
   local_ip: str
   target_ip: str
   bacnet_port: port

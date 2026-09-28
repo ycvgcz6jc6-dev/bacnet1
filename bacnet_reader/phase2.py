@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from phase3 import asset, ZONE_CAPABILITIES
 from command_audit import audit_properties, evidence
+from zone_averages import load_groups, calculate
 try:
     from bacpypes3.apdu import ErrorRejectAbortNack as BACnetError
 except ImportError:
@@ -205,6 +206,10 @@ class Supervisor:
         self.poll_duration = 0
         self.sweep_remaining = set()
         self.published = 0
+        try: self.average_groups = load_groups()
+        except (ValueError, OSError, TypeError):
+            self.average_groups = []
+            reader.log.warning("Configuration des moyennes invalide : moyennes désactivées.")
 
     def seed(self):
         self.info = self.r.metadata_cache.get((self.device_id, 'device'), {})
@@ -339,6 +344,7 @@ class Supervisor:
                 'stale_after': self.stale, 'poll_duration': self.poll_duration, **self.gate.metrics(),
                 'metadata_interval': self.r.METADATA_REFRESH, 'read_timeout': self.gate.timeout,
                 'max_read_rate': self.gate.rate, 'backoff_seconds': max(0, round(self.gate.backoff_until-time.monotonic(), 1))},
+            'averages': calculate(list(self.records.values()), self.average_groups, self.device_id, self.stale, self.r.METADATA_REFRESH+60),
             'objects': objects}
 
     def save(self):
@@ -350,6 +356,13 @@ class Supervisor:
             tmp.replace(path)
         except OSError:
             self.r.log.warning('Enregistrement de l’inventaire impossible.')
+        for avg in payload['averages']:
+            try:
+                unit, device_class = self.r.UNITS.get(avg['unit'], (None, None))
+                self.r.bridge.sensor(self.device_id, self.info, avg['key'], avg['name'], avg['value'], avg,
+                    unit=unit, device_class=device_class, available=avg['available'])
+            except Exception:
+                pass
         self.last_saved = time.monotonic()
         for key, label, value in [('read_errors', 'Erreurs de lecture', self.gate.errors),
                 ('object_count', 'Objets BACnet', len(self.records)), ('values_read', 'Valeurs lues', len(self.last_good)),

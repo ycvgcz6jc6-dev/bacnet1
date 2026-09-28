@@ -4,7 +4,7 @@ from pathlib import Path
 import BAC0
 import paho.mqtt.client as mqtt
 
-VERSION='0.5.1-audit'
+VERSION='0.5.2-averages'
 LOCAL_IP=os.getenv('LOCAL_IP','192.168.0.39/24'); TARGET_IP=os.getenv('TARGET_IP','192.168.0.249')
 BACNET_PORT=int(os.getenv('BACNET_PORT','47808')); DISCOVERY_INTERVAL=int(os.getenv('DISCOVERY_INTERVAL','60'))
 METADATA_REFRESH=int(os.getenv('METADATA_REFRESH','1800')); POLL_DELAY=float(os.getenv('POLL_DELAY','0.02'))
@@ -91,9 +91,13 @@ class MQTTBridge:
   if isinstance(payload,dict): payload=json.dumps(payload,ensure_ascii=False,allow_nan=False)
   return self.client.publish(topic,payload,qos=1,retain=retain).rc==mqtt.MQTT_ERR_SUCCESS
  def device(self,device_id,info): return {'identifiers':[f'bacnet_reader_{TARGET_IP}_{device_id}'],'name':info.get('objectName') or f'CPO {device_id}','manufacturer':info.get('vendorName') or 'BACnet','model':info.get('modelName') or 'BACnet/IP','sw_version':info.get('firmwareRevision') or 'unknown'}
- def sensor(self,device_id,info,key,name,value,attrs=None,binary=False,unit=None,device_class=None,diagnostic=False):
+ def sensor(self,device_id,info,key,name,value,attrs=None,binary=False,unit=None,device_class=None,diagnostic=False,available=None):
   component='binary_sensor' if binary else 'sensor'; unique=f"bacnet_{TARGET_IP.replace('.','_')}_{device_id}_{key}"; topic=f'{self.root}/{device_id}/{key}'
   cfg={'name':name,'unique_id':unique,'state_topic':topic+'/state','device':self.device(device_id,info),'availability_topic':self.availability,'expire_after':int(os.getenv('STALE_AFTER','180')),'origin':{'name':'BACnet Reader','sw_version':VERSION}}
+  if available is not None:
+   cfg.pop('availability_topic',None)
+   cfg['availability']=[{'topic':self.availability},{'topic':topic+'/availability'}]
+   cfg['availability_mode']='all'
   if binary: cfg.update(payload_on='ON',payload_off='OFF')
   if unit:
    cfg['unit_of_measurement']=unit
@@ -104,6 +108,8 @@ class MQTTBridge:
   ct=f'homeassistant/{component}/{unique}/config'
   if self.configs.get(ct)!=cfg and self.publish(ct,cfg,True): self.configs[ct]=cfg
   if attrs is not None:self.publish(topic+'/attributes',attrs,True)
+  if available is not None:self.publish(topic+'/availability','online' if available else 'offline',True)
+  if available is False:return True
   return self.publish(topic+'/state',str(value))
  def close(self):
   if self.connected.is_set(): self.client.publish(self.availability,'offline',qos=1,retain=True).wait_for_publish(timeout=3)

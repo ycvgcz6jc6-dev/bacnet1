@@ -1,3 +1,7 @@
+# 0.5.2 — Moyennes par zone
+
+Ajout de moyennes configurables à sources explicites, publication MQTT Discovery, disponibilité individuelle et traçabilité des sources. Aucun changement des commandes CPO. Voir MOYENNES_HA.md.
+
 # 0.5.1 — préparation Phase 4
 
 - Audit READ ONLY des tableaux de priorités et valeurs de repli.

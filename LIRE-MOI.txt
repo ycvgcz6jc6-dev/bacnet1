@@ -1,0 +1,11 @@
+BACnet Reader MCT 0.5.2 — livraison complète
+
+Le dossier bacnet_reader contient l’add-on complet, toutes les vues et assets existants, et les nouvelles moyennes MQTT. Voir bacnet_reader/MOYENNES_HA.md pour la configuration et les tableaux de bord.
+
+Installation : copier le dossier bacnet_reader dans le dossier des add-ons locaux HA (/addons), actualiser la boutique, installer/reconstruire cet add-on. Si l’installation existante vient du dépôt GitHub, ce ZIP seul ne met pas le dépôt à jour : publier d’abord les fichiers de l’add-on sur ce dépôt puis actualiser et mettre à jour. Ne pas installer une seconde instance active en parallèle ; préserver les options et sauvegarder avant remplacement. Aucune publication ni installation automatique effectuée.
+
+Les prototypes sont sous simulation/work. Depuis simulation, lancer avec Python 3.12+ : python work/preview_phase4.py. Le premier démarrage génère un nouveau mot de passe local dans work/.simulation-private ; il peut être changé dans la page protégée. Le serveur est sur 127.0.0.1:8767. La supervision de démonstration nécessite les dépendances de l’add-on et se lance avec python work/preview_phase3.py sur 8766.
+
+Les prototypes ne sont pas intégrés à HA et n’envoient aucun ordre au bâtiment. Aucun secret n’est fourni dans l’archive. Les rapports décrivent les validations CPO encore requises.
+
+Validation locale : 46 tests Python, 9 tests JavaScript. Le déploiement HA reste à effectuer.
