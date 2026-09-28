@@ -1,0 +1,151 @@
+[
+  {
+    "id": "outside_temperature",
+    "name": "Extérieur · température moyenne",
+    "zone": "Extérieur",
+    "unit": "degrees-celsius",
+    "sources": {
+      "analog-input_1": "TCPRCH__TmpBL"
+    }
+  },
+  {
+    "id": "large_extract_temperature",
+    "name": "Grande Salle · température moyenne extraction",
+    "zone": "Grande Salle",
+    "unit": "degrees-celsius",
+    "sources": {
+      "analog-input_37": "TCGP1_TmpRep"
+    }
+  },
+  {
+    "id": "large_supply_temperature",
+    "name": "Grande Salle · température moyenne soufflage",
+    "zone": "Grande Salle",
+    "unit": "degrees-celsius",
+    "sources": {
+      "analog-input_36": "TCGP1_TmpPul"
+    }
+  },
+  {
+    "id": "large_ambient_temperature",
+    "name": "Grande Salle · température moyenne ambiante",
+    "zone": "Grande Salle",
+    "unit": "degrees-celsius",
+    "sources": {}
+  },
+  {
+    "id": "small_ambient_temperature",
+    "name": "Petite Salle · température moyenne ambiante",
+    "zone": "Petite Salle",
+    "unit": "degrees-celsius",
+    "sources": {}
+  },
+  {
+    "id": "large_heating_supply",
+    "name": "Grande Salle · température moyenne eau départ",
+    "zone": "Grande Salle",
+    "unit": "degrees-celsius",
+    "sources": {
+      "analog-input_4": "Rad_Rad_BlocA_TmpDep"
+    }
+  },
+  {
+    "id": "large_heating_return",
+    "name": "Grande Salle · température moyenne eau retour",
+    "zone": "Grande Salle",
+    "unit": "degrees-celsius",
+    "sources": {
+      "analog-input_5": "Rad_Rad_BlocA_TmpRt"
+    }
+  },
+  {
+    "id": "small_heating_supply",
+    "name": "Petite Salle · température moyenne eau départ",
+    "zone": "Petite Salle",
+    "unit": "degrees-celsius",
+    "sources": {
+      "analog-input_17": "Rad_BlocB_TmpDep"
+    }
+  },
+  {
+    "id": "small_heating_return",
+    "name": "Petite Salle · température moyenne eau retour",
+    "zone": "Petite Salle",
+    "unit": "degrees-celsius",
+    "sources": {
+      "analog-input_9": "Rad_BlocB_TmpRt"
+    }
+  },
+  {
+    "id": "common_heating_supply",
+    "name": "Communs · température moyenne eau départ",
+    "zone": "Communs",
+    "unit": "degrees-celsius",
+    "sources": {
+      "analog-input_6": "Rad_BlocC_D_TmpDep"
+    }
+  },
+  {
+    "id": "common_heating_return",
+    "name": "Communs · température moyenne eau retour",
+    "zone": "Communs",
+    "unit": "degrees-celsius",
+    "sources": {
+      "analog-input_7": "Rad_BlocC_D_TmpRt"
+    }
+  },
+  {
+    "id": "office_heating_supply",
+    "name": "Bureaux administratifs · température moyenne eau départ",
+    "zone": "Bureaux administratifs",
+    "unit": "degrees-celsius",
+    "sources": {
+      "analog-input_10": "Rad_BlocExt_TmpDep"
+    }
+  },
+  {
+    "id": "office_heating_return",
+    "name": "Bureaux administratifs · température moyenne eau retour",
+    "zone": "Bureaux administratifs",
+    "unit": "degrees-celsius",
+    "sources": {
+      "analog-input_11": "Rad_BlocExt_TmpRt"
+    }
+  },
+  {
+    "id": "plant_heating_supply",
+    "name": "Chaufferie · température moyenne eau départ",
+    "zone": "Chaufferie",
+    "unit": "degrees-celsius",
+    "sources": {
+      "analog-input_2": "TCPRCH__TmpDep"
+    }
+  },
+  {
+    "id": "plant_heating_return",
+    "name": "Chaufferie · température moyenne eau retour",
+    "zone": "Chaufferie",
+    "unit": "degrees-celsius",
+    "sources": {
+      "analog-input_3": "TCPRCH__TmpRt"
+    }
+  },
+  {
+    "id": "ecs_heating_supply",
+    "name": "ECS · température moyenne eau départ",
+    "zone": "ECS",
+    "unit": "degrees-celsius",
+    "sources": {
+      "analog-input_12": "TCECS___TmpDep"
+    }
+  },
+  {
+    "id": "ecs_heating_return",
+    "name": "ECS · température moyenne eau retour",
+    "zone": "ECS",
+    "unit": "degrees-celsius",
+    "sources": {
+      "analog-input_13": "TCECS___TmpRt"
+    }
+  }
+]
